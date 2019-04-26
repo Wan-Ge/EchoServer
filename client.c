@@ -52,15 +52,19 @@ void *get_in_addr(struct sockaddr *sa)
     return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
+// DNS
 struct addrinfo* getaddr()
 {
     struct addrinfo hints, *servinfo;
     int rv;
 
+    // 初始化
     memset(&hints, 0, sizeof hints);
+    // 设置协议簇和套接字类型
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
 
+    // 把主机名和服务名转换成套接口地址结构
     if ((rv = getaddrinfo(host, port, &hints, &servinfo)) != 0) {
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
         return NULL;
@@ -98,11 +102,10 @@ void* do_connect(struct addrinfo *servinfo)
 
     sleep(1);
 
+    // 分配套接字并初始化
     socks = malloc(sizeof(int) * g_noverwrap);
     memset(socks, 0, sizeof(int)*g_noverwrap);
 
-    pthread_mutex_lock(&g_mutex);
-    pthread_mutex_unlock(&g_mutex);
     success = 0;
     for (i = 0; i < g_nloop; ++i) {
         // loop through all the results and connect to the first we can
@@ -113,18 +116,24 @@ void* do_connect(struct addrinfo *servinfo)
         }
         p = pinfo;
         k = 0;
-        for (k=0; k<g_noverwrap; ++k) {
+
+        // connect
+        for (k=0; k < g_noverwrap; ++k) {
+            // 一个域名可能对应多个 ip
             for (; p != NULL; p = p->ai_next) {
+                // 根据当前 p 获取相应信息生成 socket
                 if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
                     perror("client: socket");
                     continue;
                 }
                 prepare(sockfd);
+                // 建立连接,服务端 ip
                 if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
                     close(sockfd);
                     perror("client: connect");
                     continue;
                 }
+                // 当前套接字放到连接池
                 socks[k] = sockfd;
                 break;
             }
@@ -134,13 +143,17 @@ void* do_connect(struct addrinfo *servinfo)
         if (p == NULL) {
             continue;
         }
+
         for (j=0; j<g_nhello; ++j) {
+            // 获取当前时间
             clock_gettime(CLOCK_MONOTONIC, &t1);
 
+            // 遍历数组发送 hello
             for (k=0; k<g_noverwrap; ++k) {
-                sockfd = socks[k];
-                send(sockfd, "hello\n", 6, 0);
+                send(socks[k], "hello\n", 6, 0);
             }
+
+            // 接收
             for (k=0; k<g_noverwrap; ++k) {
                 sockfd = socks[k];
                 if ((numbytes = recv(sockfd, buf, MAXDATASIZE-1, 0)) < 0) {
@@ -152,8 +165,11 @@ void* do_connect(struct addrinfo *servinfo)
                     printf("Recieved %d bytes\n", numbytes);
                     goto exit;
                 }
+                // success 计数
                 __sync_fetch_and_add(&success, 1);
             }
+
+            // 算时差
             {
                 clock_gettime(CLOCK_MONOTONIC, &t2);
                 long long t = t2.tv_sec * 1000000000LL + t2.tv_nsec;
@@ -165,6 +181,7 @@ void* do_connect(struct addrinfo *servinfo)
         }
 
 #if SERVER_CLOSE
+        // 读取最后一个 socket 数据
         do {
             numbytes = recv(sockfd, buf, MAXDATASIZE-1, 0);
         } while (numbytes > 0);
