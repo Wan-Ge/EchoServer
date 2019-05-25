@@ -176,7 +176,7 @@ void* do_connect(struct addrinfo *servinfo)
                 t          -= t1.tv_sec * 1000000000LL + t1.tv_nsec;
                 t /= 10000; // ns => 10us
                 if (t > 1000000) t=1000000;
-                __sync_fetch_and_add(g_restimes+t, 1);
+                __sync_fetch_and_add(g_restimes+t, g_noverwrap);
             }
         }
 
